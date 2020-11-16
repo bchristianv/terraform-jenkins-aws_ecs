@@ -1,0 +1,25 @@
+[
+    {
+        "name": "jenkins",
+        "image": "${docker_image}",
+        "portMappings": [
+            {
+                "containerPort": 8080
+            }
+        ],
+        "mountPoints": [
+            {
+                "sourceVolume": "jenkins-home",
+                "containerPath": "/var/jenkins_home"
+            }
+        ],
+        "logConfiguration": {
+            "logDriver": "awslogs",
+            "options": {
+                "awslogs-group": "${awslogs_group}",
+                "awslogs-region": "${awslogs_region}",
+                "awslogs-stream-prefix": "jenkins"
+            }
+        }
+    }
+]
