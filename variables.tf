@@ -1,10 +1,5 @@
 # Variable definitions
 
-variable "aws_profile" {
-  type        = string
-  description = "The AWS profile to use for provider authentication"
-}
-
 variable "aws_region" {
   type        = string
   description = "The AWS region in which to perform configuration operations"

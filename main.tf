@@ -2,6 +2,7 @@
 
 data "aws_caller_identity" "current" {}
 
+# TODO: Use data resource to import existing vpc, instead of module resource
 module "vpc" {
   source = "github.com/bchristianv/terraform_mod-aws_vpc?ref=1.1.2"
 
@@ -23,7 +24,7 @@ resource "aws_ecs_cluster" "ecs_cluster" {
   )
 }
 
-resource "aws_cloudwatch_log_group" "jenkins_lg" {
+resource "aws_cloudwatch_log_group" "lg_jenkins" {
   name              = "ECSLogGroup-${var.ecs-cluster_name}-jenkins"
   retention_in_days = 14
   tags              = var.ecs-app_tags
@@ -36,24 +37,24 @@ resource "aws_security_group" "sg_jenkins" {
   tags        = var.ecs-app_tags
 }
 
-resource "aws_security_group_rule" "tcp8080_jenkins_inbound" {
+resource "aws_security_group_rule" "tcp8080_inbound" {
   type                     = "ingress"
   from_port                = 8080
   to_port                  = 8080
   protocol                 = "tcp"
-  source_security_group_id = aws_security_group.sg_load_balancer.id
+  source_security_group_id = aws_security_group.sg_jenkins_lb.id
   security_group_id        = aws_security_group.sg_jenkins.id
-  description              = "Allow tcp 8080 Jenkins inbound"
+  description              = "Allow Jenkins tcp 8080 inbound"
 }
 
-resource "aws_security_group_rule" "all_jenkins_outbound" {
+resource "aws_security_group_rule" "all_outbound" {
   type              = "egress"
   from_port         = 0
   to_port           = 0
   protocol          = "-1"
   cidr_blocks       = ["0.0.0.0/0"]
   security_group_id = aws_security_group.sg_jenkins.id
-  description       = "Allow all Jenkins outbound"
+  description       = "Allow Jenkins all outbound"
 }
 
 resource "aws_security_group" "sg_efs" {
@@ -61,14 +62,14 @@ resource "aws_security_group" "sg_efs" {
   description = "Enable EFS access"
   vpc_id      = module.vpc.id
   ingress {
-    description     = "Allow tcp 2049 EFS inbound"
+    description     = "Allow EFS tcp 2049 inbound"
     from_port       = 2049
     to_port         = 2049
     protocol        = "tcp"
     security_groups = [aws_security_group.sg_jenkins.id]
   }
   egress {
-    description = "Allow all EFS outbound"
+    description = "Allow EFS all outbound"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -77,9 +78,9 @@ resource "aws_security_group" "sg_efs" {
   tags = var.ecs-app_tags
 }
 
-resource "aws_security_group" "sg_load_balancer" {
+resource "aws_security_group" "sg_jenkins_lb" {
   name        = "JenkinsLoadBalancerSecurityGroup"
-  description = "Enable HTTPS access to Jenkins via load balancer"
+  description = "Enable Jenkins HTTPS access via load balancer"
   vpc_id      = module.vpc.id
   ingress {
     description = "Allow https inbound"
@@ -106,14 +107,14 @@ resource "aws_efs_file_system" "jenkins_home_fs" {
   )
 }
 
-resource "aws_efs_mount_target" "resource_mt" {
+resource "aws_efs_mount_target" "jenkins_home_mt" {
   count           = length(module.vpc.private_subnet_ids)
   file_system_id  = aws_efs_file_system.jenkins_home_fs.id
   subnet_id       = module.vpc.private_subnet_ids[count.index]
   security_groups = [aws_security_group.sg_efs.id]
 }
 
-resource "aws_efs_access_point" "jenkins_ap" {
+resource "aws_efs_access_point" "jenkins_home_ap" {
   file_system_id = aws_efs_file_system.jenkins_home_fs.id
   posix_user {
     uid = 1000
@@ -218,7 +219,7 @@ resource "aws_ecs_task_definition" "jenkins-task" {
   ]
   container_definitions = templatefile(
     "task-definitions/jenkins.json", {
-      awslogs_group  = aws_cloudwatch_log_group.jenkins_lg.name,
+      awslogs_group  = aws_cloudwatch_log_group.lg_jenkins.name,
       awslogs_region = var.aws_region
       docker_image   = var.jenkins_docker_image
     }
@@ -229,7 +230,7 @@ resource "aws_ecs_task_definition" "jenkins-task" {
       file_system_id     = aws_efs_file_system.jenkins_home_fs.id
       transit_encryption = "ENABLED"
       authorization_config {
-        access_point_id = aws_efs_access_point.jenkins_ap.id
+        access_point_id = aws_efs_access_point.jenkins_home_ap.id
         iam             = "ENABLED"
       }
     }
@@ -237,7 +238,7 @@ resource "aws_ecs_task_definition" "jenkins-task" {
   tags = var.ecs-app_tags
 }
 
-resource "aws_alb_target_group" "jenkins_target_group" {
+resource "aws_alb_target_group" "jenkins_alb_tg" {
   name                 = "JenkinsTargetGroup"
   port                 = 8080
   protocol             = "HTTP"
@@ -254,7 +255,7 @@ resource "aws_alb_target_group" "jenkins_target_group" {
 resource "aws_alb" "jenkins_alb" {
   name            = "jenkins"
   subnets         = module.vpc.public_subnet_ids
-  security_groups = [aws_security_group.sg_load_balancer.id]
+  security_groups = [aws_security_group.sg_jenkins_lb.id]
   tags            = var.ecs-app_tags
 }
 
@@ -265,7 +266,7 @@ resource "aws_alb_listener" "jenkins_alb_listener" {
   certificate_arn   = var.certificate_arn
   default_action {
     type             = "forward"
-    target_group_arn = aws_alb_target_group.jenkins_target_group.arn
+    target_group_arn = aws_alb_target_group.jenkins_alb_tg.arn
   }
 }
 
@@ -287,7 +288,7 @@ resource "aws_ecs_service" "jenkins-service" {
   load_balancer {
     container_name   = "jenkins"
     container_port   = 8080
-    target_group_arn = aws_alb_target_group.jenkins_target_group.arn
+    target_group_arn = aws_alb_target_group.jenkins_alb_tg.arn
   }
   depends_on = [aws_alb_listener.jenkins_alb_listener]
 }
