@@ -2,15 +2,16 @@
 
 data "aws_caller_identity" "current" {}
 
-# TODO: Use data resource to import existing vpc, instead of module resource
+# Optionally use a data resource to reference an existing vpc and/or
+# ecs cluster and update the module resource references throughout
 module "vpc" {
   source = "github.com/bchristianv/terraform_mod-aws_vpc?ref=1.1.2"
 
   aws_region = var.aws_region
 
-  az_private_subnets = var.vpc-az_private_subnets
-  az_public_subnets  = var.vpc-az_public_subnets
-  cidr               = var.vpc-cidr
+  az_private_subnets      = var.vpc-az_private_subnets
+  az_public_subnets       = var.vpc-az_public_subnets
+  cidr                    = var.vpc-cidr
   internal_dns_domainname = var.vpc-internal_dns_domainname
   name                    = var.vpc-name
   tags                    = var.vpc-tags
@@ -47,6 +48,16 @@ resource "aws_security_group_rule" "tcp8080_inbound" {
   description              = "Allow Jenkins tcp 8080 inbound"
 }
 
+resource "aws_security_group_rule" "tcp50000_inbound" {
+  type                     = "ingress"
+  from_port                = 50000
+  to_port                  = 50000
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.sg_jenkins_agent.id
+  security_group_id        = aws_security_group.sg_jenkins.id
+  description              = "Allow Jenkins tcp 50000 inbound"
+}
+
 resource "aws_security_group_rule" "all_outbound" {
   type              = "egress"
   from_port         = 0
@@ -55,6 +66,20 @@ resource "aws_security_group_rule" "all_outbound" {
   cidr_blocks       = ["0.0.0.0/0"]
   security_group_id = aws_security_group.sg_jenkins.id
   description       = "Allow Jenkins all outbound"
+}
+
+resource "aws_security_group" "sg_jenkins_agent" {
+  name        = "JenkinsAgentSecurityGroup"
+  description = "Enable Jenkins agent access"
+  vpc_id      = module.vpc.id
+  egress {
+    description = "Allow Jenkins agent all outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  tags = var.ecs-app_tags
 }
 
 resource "aws_security_group" "sg_efs" {
@@ -174,9 +199,90 @@ resource "aws_iam_policy" "efs_write_policy" {
 EOT
 }
 
-resource "aws_iam_role_policy_attachment" "task_role_policy" {
+resource "aws_iam_role_policy_attachment" "task_role_policy1" {
   role       = aws_iam_role.jenkins_role.name
   policy_arn = aws_iam_policy.efs_write_policy.arn
+}
+
+resource "aws_iam_policy" "create_jenkins_agents" {
+  name        = "create-jenkins-agents"
+  description = "Create Jenkins agents"
+  path        = "/"
+  policy      = <<EOT
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+        "ecs:RegisterTaskDefinition",
+        "ecs:ListClusters",
+        "ecs:DescribeContainerInstances",
+        "ecs:ListTaskDefinitions",
+        "ecs:DescribeTaskDefinition",
+        "ecs:DeregisterTaskDefinition"
+      ],
+      "Effect": "Allow",
+      "Resource": "*"
+    },
+    {
+      "Action": [
+        "ecs:ListContainerInstances"
+      ],
+      "Effect": "Allow",
+      "Resource": "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/${var.ecs-cluster_name}"
+    },
+    {
+      "Action": [
+        "ecs:RunTask"
+      ],
+      "Effect": "Allow",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/${var.ecs-cluster_name}"
+        }
+      },
+      "Resource": "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/*"
+    },
+    {
+      "Action": [
+        "ecs:StopTask"
+      ],
+      "Effect": "Allow",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/${var.ecs-cluster_name}"
+        }
+      },
+      "Resource": "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task/*"
+    },
+    {
+      "Action": [
+        "ecs:DescribeTasks"
+      ],
+      "Effect": "Allow",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/${var.ecs-cluster_name}"
+        }
+      },
+      "Resource": "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task/*"
+    },
+    {
+      "Action": [
+        "iam:GetRole",
+        "iam:PassRole"
+      ],
+      "Effect": "Allow",
+      "Resource": "${aws_iam_role.jenkins_execution_role.arn}"
+    }
+  ]
+}
+EOT
+}
+
+resource "aws_iam_role_policy_attachment" "task_role_policy2" {
+  role       = aws_iam_role.jenkins_role.name
+  policy_arn = aws_iam_policy.create_jenkins_agents.arn
 }
 
 resource "aws_iam_role" "jenkins_execution_role" {
@@ -270,6 +376,31 @@ resource "aws_alb_listener" "jenkins_alb_listener" {
   }
 }
 
+resource "aws_service_discovery_private_dns_namespace" "jenkins_sd_ns" {
+  name        = "jenkins-sd-namespace"
+  description = "Jenkins service discovery namespace"
+  vpc         = module.vpc.id
+  tags        = var.ecs-app_tags
+}
+
+resource "aws_service_discovery_service" "jenkins_sd_service" {
+  name         = "jenkins"
+  namespace_id = aws_service_discovery_private_dns_namespace.jenkins_sd_ns.id
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.jenkins_sd_ns.id
+    dns_records {
+      ttl  = 60
+      type = "A"
+    }
+    dns_records {
+      ttl  = 60
+      type = "SRV"
+    }
+    routing_policy = "MULTIVALUE"
+  }
+  tags = var.ecs-app_tags
+}
+
 resource "aws_ecs_service" "jenkins-service" {
   name                               = "Jenkins-ECS_service"
   cluster                            = aws_ecs_cluster.ecs_cluster.id
@@ -289,6 +420,10 @@ resource "aws_ecs_service" "jenkins-service" {
     container_name   = "jenkins"
     container_port   = 8080
     target_group_arn = aws_alb_target_group.jenkins_alb_tg.arn
+  }
+  service_registries {
+    registry_arn = aws_service_discovery_service.jenkins_sd_service.arn
+    port         = 50000
   }
   depends_on = [aws_alb_listener.jenkins_alb_listener]
 }
