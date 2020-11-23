@@ -34,6 +34,12 @@ variable "jenkins_docker_image" {
   default     = "jenkins/jenkins:lts"
 }
 
+variable "jenkins_source_cidrs" {
+  type        = list(string)
+  description = "A list of source CIDR's to enable access to the Jenkins UI via the load balancer"
+  default     = ["0.0.0.0/0"]
+}
+
 variable "vpc-az_private_subnets" {
   type        = map(map(number))
   description = "Private subnets map of region AZ ID to subnet bits and network number, eg: {b = { sbits = 8, net = 1 }}"
