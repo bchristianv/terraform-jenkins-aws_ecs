@@ -38,24 +38,34 @@ resource "aws_security_group" "sg_jenkins" {
   tags        = var.ecs-app_tags
 }
 
-resource "aws_security_group_rule" "tcp8080_inbound" {
+resource "aws_security_group_rule" "tcp8080_lb_inbound" {
   type                     = "ingress"
   from_port                = 8080
   to_port                  = 8080
   protocol                 = "tcp"
   source_security_group_id = aws_security_group.sg_jenkins_lb.id
   security_group_id        = aws_security_group.sg_jenkins.id
-  description              = "Allow Jenkins tcp 8080 inbound"
+  description              = "Allow Jenkins Load Balancer tcp 8080 inbound"
 }
 
-resource "aws_security_group_rule" "tcp50000_inbound" {
+resource "aws_security_group_rule" "tcp8080_agent_inbound" {
+  type                     = "ingress"
+  from_port                = 8080
+  to_port                  = 8080
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.sg_jenkins_agent.id
+  security_group_id        = aws_security_group.sg_jenkins.id
+  description              = "Allow Jenkins agent tcp 8080 inbound"
+}
+
+resource "aws_security_group_rule" "tcp50000_agentinbound" {
   type                     = "ingress"
   from_port                = 50000
   to_port                  = 50000
   protocol                 = "tcp"
   source_security_group_id = aws_security_group.sg_jenkins_agent.id
   security_group_id        = aws_security_group.sg_jenkins.id
-  description              = "Allow Jenkins tcp 50000 inbound"
+  description              = "Allow Jenkins agent tcp 50000 inbound"
 }
 
 resource "aws_security_group_rule" "all_outbound" {
@@ -412,7 +422,7 @@ resource "aws_ecs_service" "jenkins-service" {
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 100
   network_configuration {
-    assign_public_ip = true
+    assign_public_ip = false
     subnets          = module.vpc.private_subnet_ids
     security_groups  = [aws_security_group.sg_jenkins.id]
   }
