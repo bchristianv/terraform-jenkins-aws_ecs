@@ -1,0 +1,57 @@
+jenkins:
+  agentProtocols:
+    - "JNLP4-connect"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  remotingSecurity:
+    enabled: true
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: ${JENKINS_USERID}
+          name: ${JENKINS_USERNAME}
+          password: ${JENKINS_PASSWORD}
+          properties:
+            - mailer:
+                emailAddress: ${JENKINS_EMAIL}
+  slaveAgentPort: 50000
+  clouds:
+    - ecs:
+        credentialsId: ''
+        cluster: ${ECS_CLUSTER}
+        jenkinsUrl: ${JENKINS_URL_PRIVATE}
+        name: "ecs-cloud"
+        regionName: ${AWS_REGION}
+        templates:
+          - assignPublicIp: false
+            cpu: 1024
+            executionRole: ${JENKINS_EXECUTION_ROLE_ARN}
+            image: "jenkins/inbound-agent:alpine"
+            label: "ecs"
+            launchType: "FARGATE"
+            logDriver: "awslogs"
+            logDriverOptions:
+              - name: "awslogs-group"
+                value: ${AWSLOGS_GROUP}
+              - name: "awslogs-region"
+                value: ${AWS_REGION}
+              - name: "awslogs-stream-prefix"
+                value: "jenkins-agent"
+            memory: 0
+            memoryReservation: 2048
+            networkMode: "default"
+            platformVersion: "LATEST"
+            privileged: false
+            remoteFSRoot: "/home/jenkins"
+            securityGroups: ${JENKINS_AGENT_SG_ID}
+            sharedMemorySize: 0
+            subnets: ${SUBNET_IDS}
+            templateName: "jenkins-agent"
+            uniqueRemoteFSRoot: false
+        tunnel: ${JENKINS_TUNNEL}
+unclassified:
+  location:
+    adminAddress: "address not configured yet <nobody@nowhere>"
+    url: ${JENKINS_URL}
