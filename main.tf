@@ -17,6 +17,23 @@ module "vpc" {
   tags                    = var.vpc-tags
 }
 
+resource "aws_secretsmanager_secret" "jenkins_user" {
+  name        = "JenkinsPassword"
+  description = "Jenkins administrative user password"
+  tags        = var.ecs-app_tags
+}
+
+resource "aws_secretsmanager_secret_version" "jenkins_user" {
+  secret_id     = aws_secretsmanager_secret.jenkins_user.id
+  secret_string = random_password.jenkins_user.result
+}
+
+resource "random_password" "jenkins_user" {
+  length           = 18
+  special          = true
+  override_special = "!@#$%&*()-_=+[]{}<>?"
+}
+
 resource "aws_ecs_cluster" "ecs_cluster" {
   name = var.ecs-cluster_name
   tags = merge(
@@ -317,6 +334,29 @@ EOT
   tags               = var.ecs-app_tags
 }
 
+resource "aws_iam_role_policy" "execution_role_policy" {
+  name   = "jenkins-execution-role-policy"
+  role   = aws_iam_role.jenkins_execution_role.id
+  policy = <<EOT
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameters",
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": [
+        "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${aws_secretsmanager_secret.jenkins_user.name}",
+        "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${aws_secretsmanager_secret.jenkins_user.name}*"
+      ]
+    }
+  ]
+}
+EOT
+}
+
 resource "aws_iam_role_policy_attachment" "jenkins_execution_role_policy" {
   role       = aws_iam_role.jenkins_execution_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
@@ -335,9 +375,19 @@ resource "aws_ecs_task_definition" "jenkins-task" {
   ]
   container_definitions = templatefile(
     "task-definitions/jenkins.json", {
-      awslogs_group  = aws_cloudwatch_log_group.lg_jenkins.name,
-      awslogs_region = var.aws_region
-      docker_image   = var.jenkins_docker_image
+      awslogs_group                  = aws_cloudwatch_log_group.lg_jenkins.name
+      aws_region                     = var.aws_region
+      ecs_cluster                    = aws_ecs_cluster.ecs_cluster.arn
+      docker_image                   = var.jenkins_docker_image
+      jenkins_agent_sg_id            = aws_security_group.sg_jenkins_agent.id
+      jenkins_email                  = var.jenkins_email
+      jenkins_execution_role_arn     = aws_iam_role.jenkins_execution_role.arn
+      jenkins_password               = aws_secretsmanager_secret.jenkins_user.arn
+      jenkins_service_discovery_host = "${aws_service_discovery_service.jenkins_sd_service.name}.${aws_service_discovery_private_dns_namespace.jenkins_sd_ns.name}"
+      jenkins_url                    = var.jenkins_url
+      jenkins_userid                 = var.jenkins_userid
+      jenkins_username               = var.jenkins_username
+      subnet_ids                     = join(",", module.vpc.private_subnet_ids)
     }
   )
   volume {
