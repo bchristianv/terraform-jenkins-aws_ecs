@@ -16,12 +16,68 @@
                 "containerPath": "/var/jenkins_home"
             }
         ],
+        "environment": [
+            {
+                "name": "AWS_REGION",
+                "value": "${aws_region}"
+            },
+            {
+                "name": "AWSLOGS_GROUP",
+                "value": "${awslogs_group}"
+            },
+            {
+                "name": "ECS_CLUSTER",
+                "value": "${ecs_cluster}"
+            },
+            {
+                "name": "JENKINS_AGENT_SG_ID",
+                "value": "${jenkins_agent_sg_id}"
+            },
+            {
+                "name": "JENKINS_EMAIL",
+                "value": "${jenkins_email}"
+            },
+            {
+                "name": "JENKINS_EXECUTION_ROLE_ARN",
+                "value": "${jenkins_execution_role_arn}"
+            },
+            {
+                "name": "JENKINS_TUNNEL",
+                "value": "${jenkins_service_discovery_host}:50000"
+            },
+            {
+                "name": "JENKINS_URL",
+                "value": "${jenkins_url}"
+            },
+            {
+                "name": "JENKINS_URL_PRIVATE",
+                "value": "http://${jenkins_service_discovery_host}:8080/"
+            },
+            {
+                "name": "JENKINS_USERID",
+                "value": "${jenkins_userid}"
+            },
+            {
+                "name": "JENKINS_USERNAME",
+                "value": "${jenkins_username}"
+            },
+            {
+                "name": "SUBNET_IDS",
+                "value": "${subnet_ids}"
+            }
+        ],
+        "secrets": [
+            {
+                "name": "JENKINS_PASSWORD",
+                "valueFrom": "${jenkins_password}"
+            }
+        ],
         "logConfiguration": {
             "logDriver": "awslogs",
             "options": {
                 "awslogs-group": "${awslogs_group}",
-                "awslogs-region": "${awslogs_region}",
-                "awslogs-stream-prefix": "jenkins"
+                "awslogs-region": "${aws_region}",
+                "awslogs-stream-prefix": "jenkins-agent"
             }
         }
     }

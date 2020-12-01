@@ -34,10 +34,32 @@ variable "jenkins_docker_image" {
   default     = "jenkins/jenkins:lts"
 }
 
+variable "jenkins_email" {
+  type        = string
+  description = "Email address for Jenkins administrative user"
+}
+
 variable "jenkins_source_cidrs" {
   type        = list(string)
   description = "A list of source CIDR's to enable access to the Jenkins UI via the load balancer"
   default     = ["0.0.0.0/0"]
+}
+
+variable "jenkins_url" {
+  type        = string
+  description = "Full URL for Jenkins including protocol, and port if necessary"
+}
+
+variable "jenkins_userid" {
+  type        = string
+  description = "User ID of Jenkins administrative user"
+  default     = "Administrator"
+}
+
+variable "jenkins_username" {
+  type        = string
+  description = "Full name of Jenkins administrative user"
+  default     = "Jenkins Administrator"
 }
 
 variable "vpc-az_private_subnets" {
